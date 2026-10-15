@@ -80,6 +80,31 @@ async def reset(payload: dict[str, Any]) -> dict[str, str]:
     return {"status": "ok"}
 
 
+MISSING_PATTERNS = (
+    ("Insufficient Balance", "模型账户余额不足（DeepSeek 返回 402）。"
+                             "去 platform.deepseek.com 充值，或换一家的 key 填进 .env，"
+                             "也可以先把 .env 里的 key 注释掉、用 Mock 模式继续学。"),
+    ("401", "key 无效或已过期（401）。检查 .env 里的 key 是否完整、有没有多余空格。"),
+    ("402", "模型账户余额不足（402）。充值后即可恢复，或换一家的 key。"),
+    ("429", "触发限流（429）。等一会儿再问，或者在 .env 里换一家。"),
+    ("Model Not Exist", "模型名不存在。检查 .env 里的 model 名是否和该供应商提供的一致。"),
+)
+
+
+def explain_model_error(err: Exception) -> str:
+    """把上游的报错翻译成「用户知道下一步该干什么」的一句话。
+
+    直接把 402 的原始 JSON 甩给用户是没有意义的 ——
+    报错信息的作用是指路，不是自证清白。
+    """
+    text = str(err)
+    for pattern, advice in MISSING_PATTERNS:
+        if pattern in text:
+            return f"模型调用失败：{advice}"
+    return (f"调用模型时出错：{type(err).__name__}: {text[:300]}\n"
+            f"（若是网络问题，确认这台机器能访问该供应商的接口）")
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     history = SESSIONS.setdefault(req.session_id, [])
@@ -107,7 +132,7 @@ async def chat(req: ChatRequest):
                      "或者模型在原地打转 —— 这正是「误差累积」的典型表现。")
     except Exception as e:  # noqa: BLE001
         return JSONResponse(status_code=200, content={
-            "reply": f"调用模型时出错：{type(e).__name__}: {e}",
+            "reply": explain_model_error(e),
             "trace": trace,
             "steps": steps,
             "session_id": req.session_id,

@@ -21,6 +21,10 @@ import httpx
 
 F10_API = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
 ANN_API = "https://np-anotice-stock.eastmoney.com/api/security/ann"
+SUGGEST_API = "https://searchapi.eastmoney.com/api/suggest/get"
+
+# 搜索接口需要一个公开的 token（就是网页版自己在用的那个，不是用户凭据）
+SUGGEST_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8"
 
 # 这套接口对 UA 敏感，不带 UA 容易被掐
 HEADERS = {
@@ -302,3 +306,89 @@ async def fetch_announcements(symbol: str, limit: int = 8) -> dict[str, Any]:
         "data": {"code": symbol, "count": len(anns), "items": anns,
                  "source": "东方财富 · 公司公告"},
     })
+
+
+# --------------------------------------------------------------------------
+# 4) 标的搜索：把「人话里的名字」变成代码
+# --------------------------------------------------------------------------
+# 之前这一步是靠一张硬编码的别名表做的，只能认十几个名字。
+# 用户问「科创半导体ETF现在多少钱」时表里没有 → 解析出空 → 工具直接哑火。
+# 表现是「回答没意义」，根因是**代码识别能力被写死在一张表里**。
+#
+# 正确做法是把「认名字」也变成一次真实查询：让上游的搜索接口告诉我们代码。
+# 这样全市场 2 万多个标的（股票/ETF/指数/可转债）都能被问到。
+_MKT_BY_QUOTEID = {
+    "1": "sh",                      # 沪市
+    "0": "sz",                      # 深市
+    "105": "us", "106": "us", "107": "us",   # 美股（NASDAQ/NYSE/AMEX）
+    "116": "hk", "128": "hk", "124": "hk",   # 港股
+    "90": "bj", "93": "bj",         # 北交所
+}
+
+# SecurityTypeName 是上游给的中文分类，直接用来告诉模型「这是什么」
+_TYPE_LABEL = {
+    "沪A": "股票", "深A": "股票", "北证A": "股票", "京A": "股票",
+    "基金": "ETF/基金", "港股": "港股", "美股": "美股", "指数": "指数",
+}
+
+
+def quoteid_to_symbol(quote_id: Any, code: Any) -> str | None:
+    """QuoteID（如 '1.600519'、'116.00700'、'105.NVDA'）→ 内部代码（sh600519）。"""
+    if not quote_id or not code:
+        return None
+    head = str(quote_id).split(".")[0].strip()
+    plain = str(code).upper()
+
+    # 北交所的指数（899xxx）挂在前缀 0 下，但行情接口只认 bj899050。
+    # 「前缀 0 就是深市」这个假设在这里会翻车，而翻车的表现是「查不到数据」。
+    if head == "0" and plain.startswith("899"):
+        return "bj" + plain
+
+    market = _MKT_BY_QUOTEID.get(head)
+    if not market:
+        return None
+    return market + plain
+
+
+async def search_security(keyword: str, limit: int = 8) -> list[dict[str, Any]]:
+    """按名称/简称/代码搜索标的，返回带代码的候选列表（按相关度）。
+
+    返回的每一项都是模型能直接拿去调用别的工具的东西，这很关键：
+    解析的结果必须**回流到上下文**，模型才知道自己刚才问的到底是哪只标的。
+    """
+    kw = str(keyword or "").strip()
+    if not kw:
+        return []
+
+    key = f"sug:{kw}:{limit}"
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        async with httpx.AsyncClient(timeout=8, headers=HEADERS) as client:
+            resp = await client.get(SUGGEST_API, params={
+                "input": kw, "type": "14", "token": SUGGEST_TOKEN,
+            })
+            payload = resp.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+
+    rows = ((payload.get("QuotationCodeTable") or {}).get("Data")) or []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = quoteid_to_symbol(row.get("QuoteID"), row.get("Code"))
+        if not symbol:
+            continue
+        type_name = row.get("SecurityTypeName") or ""
+        out.append({
+            "symbol": symbol,
+            "code": row.get("Code"),
+            "name": row.get("Name"),
+            "type": _TYPE_LABEL.get(type_name, type_name),
+            "is_fund": type_name == "基金" or row.get("Classify") == "Fund",
+        })
+        if len(out) >= limit:
+            break
+
+    return _cache_put(key, out)

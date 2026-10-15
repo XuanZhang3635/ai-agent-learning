@@ -116,6 +116,20 @@
   .loading i:nth-child(3){animation-delay:.3s}
   @keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}
 
+  /* 后端没连上时的横幅 —— 比让用户对着输入框干瞪眼强 */
+  .banner{
+    display:flex; align-items:center; gap:9px; font-size:13px;
+    background:#FAECE7; color:#712B13; border-bottom:.5px solid #F0997B;
+    padding:10px 28px;
+  }
+  .banner[hidden]{display:none}
+  .banner b{font-weight:600}
+  .banner button{
+    margin-left:auto; font-family:inherit; font-size:12.5px; cursor:pointer;
+    color:#712B13; background:transparent; border:.5px solid #F0997B;
+    border-radius:7px; padding:3px 10px;
+  }
+
   .composer{border-top:.5px solid var(--line); background:var(--card); padding:16px 0 20px}
   .composer .inner{display:flex; gap:10px; align-items:flex-end}
   textarea{
@@ -177,11 +191,16 @@
   </aside>
 
   <main>
+    <div class="banner" id="offline" hidden>
+      <span>后端没连上，现在提问不会有人回答。</span>
+      <b id="offlineWhy"></b>
+      <button id="retryBtn">重试连接</button>
+    </div>
     <div class="scroll" id="scroll">
       <div class="inner" id="messages">
         <div class="empty">
-          <div class="big">这个块只做一件事</div>
-          <p>把问题 + 工具清单交给模型，模型决定调哪个工具，执行完把结果写回上下文，再回答你。所有工具调用都会摊开给你看。</p>
+          <div class="big">随便打字问，不用点左边的示例</div>
+          <p>把问题 + 工具清单交给模型，模型决定调哪个工具，执行完把结果写回上下文，再回答你。左侧那 6 个只是示例，输入框里想打什么都可以。</p>
         </div>
       </div>
     </div>
@@ -300,6 +319,7 @@
     if (busy || !text.trim()) return;
     busy = true;
     sendEl.disabled = true;
+    var drafted = inputEl.value;          // 发送失败时要把内容还给用户
     addUser(text);
     inputEl.value = '';
     inputEl.style.height = 'auto';
@@ -311,17 +331,21 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sid, message: text })
       });
+      if (!r.ok) throw new Error('服务端返回 ' + r.status);
       var data = await r.json();
       load.remove();
-      if (!r.ok && !data.reply) { addError('服务端返回 ' + r.status); }
-      else { addBot(data.reply || '(空回复)', data.trace || [], data.steps || 0); }
+      addBot(data.reply || '(空回复)', data.trace || [], data.steps || 0);
+      markOnline();
     } catch (e) {
       load.remove();
-      addError('请求失败：' + e.message + '（确认服务已启动，端口没被占用）');
+      inputEl.value = drafted;            // 别把用户打了一半的字弄丢
+      autoGrow();
+      inputEl.focus();
+      addError('请求失败：' + e.message + '。文字已放回输入框，服务恢复后直接再按一次 Enter。');
+      markOffline(e.message);
     } finally {
       busy = false;
       sendEl.disabled = false;
-      inputEl.focus();
     }
   }
 
@@ -330,9 +354,27 @@
     inputEl.style.height = Math.min(inputEl.scrollHeight, 150) + 'px';
   }
 
+  // ------------------------------------------------------------------
+  // 输入法（IME）处理 —— 这一段是「打不了中文」的根因所在
+  //
+  // 用拼音打字时，按 Enter 是「把候选词上屏」，不是「发送」。
+  // 但浏览器同样会抛出 keydown(Enter)，如果不管三七二十一就发送：
+  //   1) preventDefault() 会让某些输入法上不了屏 → 中文根本打不出来
+  //   2) 就算上了屏，发出去的也是刚敲的拼音字母
+  //
+  // 所以必须靠 isComposing / keyCode 229 把「输入法正在组词」这个状态排除掉。
+  // 这类 bug 在英文键盘上永远复现不了，只有中文用户会撞上。
+  // ------------------------------------------------------------------
+  var composing = false;
+  inputEl.addEventListener('compositionstart', function () { composing = true; });
+  inputEl.addEventListener('compositionend', function () { composing = false; });
+
   inputEl.addEventListener('input', autoGrow);
   inputEl.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(inputEl.value); }
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (composing || e.isComposing || e.keyCode === 229) return;  // 正在选词，交给输入法
+    e.preventDefault();
+    send(inputEl.value);
   });
   sendEl.addEventListener('click', function () { send(inputEl.value); });
 
@@ -350,26 +392,51 @@
       + '<p>长期记忆里只保存了「用户问了什么、助手答了什么」，工具调用的原始返回从不进入记忆。</p></div>';
   });
 
-  fetch('/api/config').then(function (r) { return r.json(); }).then(function (cfg) {
-    var badge = document.getElementById('modeBadge');
-    badge.className = 'mode ' + cfg.mode;
-    document.getElementById('modeText').textContent =
-      cfg.mode === 'mock' ? 'Mock 模式 · 规则模拟决策' : ('真实模型 · ' + cfg.model);
+  // ------------------------------------------------------------------
+  // 后端连通性：连不上就明说，别让用户对着一个没人接听的输入框发消息。
+  // 页面是从文件打开、或服务没起时，/api/config 会失败 —— 这时挂出横幅并定期重试。
+  // ------------------------------------------------------------------
+  var offlineEl = document.getElementById('offline');
+  var offlineWhyEl = document.getElementById('offlineWhy');
 
-    document.getElementById('cfgSteps').textContent = cfg.max_steps + ' 轮';
-    document.getElementById('cfgTurns').textContent = '最近 ' + cfg.history_turns + ' 条';
+  function markOnline() {
+    offlineEl.hidden = true;
+  }
+  function markOffline(reason) {
+    offlineWhyEl.textContent = reason || '';
+    offlineEl.hidden = false;
+  }
 
-    document.getElementById('toolList').innerHTML = cfg.tools.map(function (t) {
-      return '<div class="tool"><code>' + esc(t.name) + '</code>'
-        + '<p>' + esc(t.description) + '</p>'
-        + '<div class="params">' + esc(t.params.join(', ')) + '</div></div>';
-    }).join('');
+  async function checkBackend() {
+    try {
+      var r = await fetch('/api/config', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var cfg = await r.json();
+      markOnline();
 
-    if (cfg.mode === 'mock') {
-      document.getElementById('hint').textContent =
-        '当前是 Mock 模式：没有真实的 LLM 在决策，而是用规则模拟了它的选择过程。设置 OPENAI_API_KEY 后会切换到真实模型。';
+      var badge = document.getElementById('modeBadge');
+      badge.className = 'mode ' + cfg.mode;
+      document.getElementById('modeText').textContent =
+        cfg.mode === 'mock' ? 'Mock 模式 · 规则模拟决策' : ('真实模型 · ' + cfg.model);
+
+      document.getElementById('cfgSteps').textContent = cfg.max_steps + ' 轮';
+      document.getElementById('cfgTurns').textContent = '最近 ' + cfg.history_turns + ' 条';
+
+      document.getElementById('toolList').innerHTML = cfg.tools.map(function (t) {
+        return '<div class="tool"><code>' + esc(t.name) + '</code>'
+          + '<p>' + esc(t.description) + '</p>'
+          + '<div class="params">' + esc(t.params.join(', ')) + '</div></div>';
+      }).join('');
+
+      document.getElementById('hint').textContent = cfg.hint
+        || '所有数据来自公开行情接口，仅供学习，不构成投资建议。';
+    } catch (e) {
+      markOffline(e.message);
+      setTimeout(checkBackend, 5000);   // 服务起来后 5 秒内自动恢复
     }
-  }).catch(function () {});
+  }
+  checkBackend();
+  document.getElementById('retryBtn').addEventListener('click', checkBackend);
 
   inputEl.focus();
 })();

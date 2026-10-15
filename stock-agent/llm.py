@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from tools import resolve_symbols
+from tools import resolve_symbols_async
 
 # python-dotenv 随 uvicorn[standard] 一起装上了；没装也不影响运行
 try:
@@ -101,6 +101,25 @@ def _n(value: Any, digits: int = 2) -> str:
     return f"{value:,.{digits}f}"
 
 
+def _n_change(value: Any) -> str:
+    """涨跌额：ETF 这种单价不到 1 元的标的，两位小数会把 -0.002 显示成 0.00，
+    看上去像「没动」。按数量级自适应精度，比固定两位小数诚实。"""
+    if value is None:
+        return "—"
+    v = float(value)
+    if v != 0 and abs(v) < 0.01:
+        return f"{v:,.3f}"
+    return f"{v:,.2f}"
+
+
+# 「它 / 这只 / 刚才那个」——本句没提标的，但历史里有。指代消解的触发词。
+_PRONOUN_RE = re.compile(
+    r"它|他|她|这个|那个|该股|这只|那只|这家|那家|这支|那支|上面|上述|刚才|前者|后者"
+)
+# 「我上一句问了什么」——在问对话本身，不需要调工具
+_RECALL_RE = re.compile(r"上一句|上一个问题|上一条|我问过什么|我问的是什么|我说过什么|聊过什么|还记得我")
+
+
 class MockLLM(BaseLLM):
     """这不是一个真模型，而是一段「模仿模型决策」的规则。
 
@@ -118,14 +137,34 @@ class MockLLM(BaseLLM):
         if already_called:
             return {"content": self._compose(messages, already_called), "tool_calls": []}
 
-        # 光靠上下文就能回答的问题：不调工具，直接答。这就是 Memory 在起作用。
-        if re.search(r"上一句|上一个问题|刚才|之前|还记得|记忆|聊过|我说过", question):
+        # 先解析本句里的标的
+        symbols = await resolve_symbols_async(question)
+
+        # 指代消解：本句没提任何标的，但用了「它 / 这只 / 刚才那个」，
+        # 就回看最近几轮提问把标的补回来。这就是 Memory 真正在干活的样子 ——
+        # 信息不在这一句里，而在对话历史里。
+        if not symbols and _PRONOUN_RE.search(question):
+            symbols = await self._symbols_from_history(user_msgs)
+
+        # 纯粹在问「对话本身」的问题，不需要工具
+        if _RECALL_RE.search(question):
             return {"content": self._recall(user_msgs), "tool_calls": []}
 
-        calls = self._decide(question)
+        calls = await self._decide(question, symbols)
         if not calls:
             return {"content": self._no_tool(tools), "tool_calls": []}
         return {"content": "", "tool_calls": calls}
+
+    async def _symbols_from_history(self, user_msgs) -> list[str]:
+        """从最近的提问里找回标的。只看最近 3 句，别无限回溯 ——
+        回溯太远会把「三轮前聊的那只」也捞出来，比答不上来更危险。
+        """
+        previous = [m["content"] for m in user_msgs[:-1]][-3:]
+        for text in reversed(previous):
+            symbols = await resolve_symbols_async(text)
+            if symbols:
+                return symbols
+        return []
 
     def _recall(self, user_msgs) -> str:
         prior = [m["content"] for m in user_msgs[:-1]]
@@ -137,14 +176,15 @@ class MockLLM(BaseLLM):
                 "是我从对话历史里取回来的。历史一旦不进上下文，我就答不上来。）")
 
     def _no_tool(self, tools) -> str:
-        names = "、".join(t["function"]["name"] for t in tools)
-        return (f"我判断这个问题不需要调用工具，但光靠我自己也没有把握回答。\n"
-                f"当前块里挂了 {len(tools)} 个工具：{names}。\n"
-                f"把问题落到具体标的上会更容易命中，例如「贵州茅台现在多少钱」"
-                f"或「宁德时代最近 10 个交易日走势」。")
+        return ("没听出你问的是哪只标的，所以我没去查数据 —— 我不想凭空编一个答案给你。\n"
+                "把名字或代码说清楚就行，股票、指数、ETF 都可以，例如：\n"
+                "- 科创半导体ETF 现在多少钱\n"
+                "- 沪深300 最近一个月走势\n"
+                "- 600519 的毛利率\n"
+                "（当前块里挂了 5 个工具，都是查数据用的；光靠我自己没有可确认的信息。）")
 
     # ---- 决策：像模型一样挑工具、填参数 ----
-    def _decide(self, q: str) -> list[dict[str, Any]]:
+    async def _decide(self, q: str, symbols: list[str]) -> list[dict[str, Any]]:
         calls: list[dict[str, Any]] = []
 
         def emit(name: str, args: dict[str, Any]) -> None:
@@ -154,16 +194,20 @@ class MockLLM(BaseLLM):
                 "arguments": json.dumps(args, ensure_ascii=False),
             })
 
-        symbols = resolve_symbols(q)
         symbol_arg = ",".join(symbols)
 
         # 注意顺序：公告里的「最近有什么」也会命中走势的「最近」，
         # 所以先算公告，再把它从走势里排除掉。规则式实现最容易在这种
         # 关键词打架的地方出错 —— 这正是 Mock 与真模型最本质的差距。
         wants_ann = bool(re.search(r"公告|消息|新闻|披露|发生了什么|最近有什么", q))
+        # 「今天表现」问的是当下这一刻，不是区间 ——
+        # 只有在明确给了天数（最近10天）时才走走势工具。
+        has_day_count = bool(re.search(r"\d{1,3}\s*(?:个)?\s*(?:交易日|天|日)", q))
         wants_history = bool(
             re.search(r"走势|趋势|最近|近期|这几天|日线|区间|涨幅|跌了多少|表现|k线", q)
-        ) and not wants_ann
+        ) and not wants_ann and not (
+            re.search(r"今天|今日|现在|目前|盘中", q) and not has_day_count
+        )
         wants_quote = bool(re.search(
             r"现在|现价|多少钱|股价|报价|涨|跌|行情|估值|市盈率|市值|换手|成交|怎么样|如何|看看", q))
         wants_profile = bool(re.search(r"做什么|主营业务|简介|介绍|行业|是什么公司|上市|实控人|老板|官网|员工", q))
@@ -213,9 +257,9 @@ class MockLLM(BaseLLM):
                     chg = d.get("change") or 0
                     direction = "上涨" if chg > 0 else ("下跌" if chg < 0 else "持平")
                     line = (
-                        f"{d['name']}（{d['code']} · {d.get('market')}）"
+                        f"{d['name']}（{d['code']} · {d.get('security_type') or d.get('market')}）"
                         f"最新价 {_n(d.get('price'))} {d.get('currency')}，"
-                        f"{direction} {_n(abs(chg))}（{d.get('change_pct')}%）；"
+                        f"{direction} {_n_change(abs(chg))}（{d.get('change_pct')}%）；"
                         f"今日区间 {_n(d.get('low'))}–{_n(d.get('high'))}"
                     )
                     if d.get("volume"):
@@ -227,18 +271,24 @@ class MockLLM(BaseLLM):
                     if d.get("pb") is not None:
                         line += f"；市净率 {d['pb']}"
                     if d.get("market_cap"):
-                        line += f"；总市值 {d['market_cap']:,.2f}{d.get('market_cap_unit')}"
+                        # ETF 的市值字段其实是基金规模，标签必须跟着变
+                        line += (f"；{d.get('cap_label', '总市值')} "
+                                 f"{d['market_cap']:,.2f}{d.get('market_cap_unit')}")
                     line += f"。数据时间 {d.get('updated_at')}。"
                     blocks.append(line)
 
             elif kind == "history":
-                blocks.append(
-                    f"{data['code']}（{data.get('market')}）最近 {data['trading_days']} 个交易日"
+                line = (
+                    f"{data.get('name') or data['code']}（{data['code']} · {data.get('market')}）"
+                    f"最近 {data['trading_days']} 个交易日"
                     f"（{data['start_date']} 至 {data['end_date']}）"
                     f"区间涨跌 {data['period_change_pct']}%，"
                     f"区间最高 {_n(data['period_high'])}、最低 {_n(data['period_low'])}，"
                     f"日均成交 {_n(data['avg_volume'], 0)}{data.get('volume_unit', '')}。"
                 )
+                if data.get("note"):
+                    line += f"\n  注意：{data['note']}"
+                blocks.append(line)
 
             elif kind == "profile":
                 p = data["profile"]
@@ -251,7 +301,7 @@ class MockLLM(BaseLLM):
                 blocks.append("\n".join(lines))
 
             elif kind == "financials":
-                lines = [f"{data['code']} 财务与经营结构"
+                lines = [f"{data.get('name') or data['code']} 财务与经营结构"
                          f"（报告期 {data.get('report_period', '—')}）"]
                 for m in data.get("metrics", []):
                     yoy = f"，同比 {m['同比']}" if m.get("同比") else ""
@@ -268,7 +318,7 @@ class MockLLM(BaseLLM):
                 blocks.append("\n".join(lines))
 
             elif kind == "announcements":
-                lines = [f"{data['code']} 最近 {data['count']} 条公告"]
+                lines = [f"{data.get('name') or data['code']} 最近 {data['count']} 条公告"]
                 for i, it in enumerate(data["items"], 1):
                     lines.append(f"{i}. [{it['披露时间']}｜{it['类型']}] {it['标题']}")
                 blocks.append("\n".join(lines))
@@ -282,24 +332,46 @@ class MockLLM(BaseLLM):
 # --------------------------------------------------------------------------
 # 归一化：不管用哪家，调用方看到的都是同一个 BaseLLM。
 # 加一家新供应商 = 往这张表里加一行 + 在 .env 里写个 key。
+# 列在「候选」里的都是国内可直连、且原生支持 function calling 的 ——
+# 不支持 function calling 的模型接进来会废掉整个 block，这一条是硬门槛。
 PROVIDERS: dict[str, tuple[str, str, str]] = {
-    #  provider    : (key 环境变量,        base_url,                     默认模型)
-    "deepseek": ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1", "deepseek-chat"),
-    "openai":   ("OPENAI_API_KEY",   "https://api.openai.com/v1",  "gpt-4o-mini"),
+    #  provider    : (key 环境变量,        base_url,                              默认模型)
+    "deepseek":    ("DEEPSEEK_API_KEY",    "https://api.deepseek.com/v1",         "deepseek-chat"),
+    "dashscope":   ("DASHSCOPE_API_KEY",   "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+    "zhipu":       ("ZHIPU_API_KEY",       "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash"),
+    "moonshot":    ("MOONSHOT_API_KEY",    "https://api.moonshot.cn/v1",          "moonshot-v1-8k"),
+    "siliconflow": ("SILICONFLOW_API_KEY", "https://api.siliconflow.cn/v1",       "Qwen/Qwen2.5-7B-Instruct"),
+    "openai":      ("OPENAI_API_KEY",      "https://api.openai.com/v1",           "gpt-4o-mini"),
 }
+
+# 没配 OPENAI_BASE_URL 时，允许用 PROV=xxx 显式指定走哪家
+_ENV_PROVIDER = "PROV"
 # 显式覆盖用的通用变量名（任何 OpenAI 兼容端点都能接）
 _ENV_BASE = "OPENAI_BASE_URL"
 _ENV_MODEL = "OPENAI_MODEL"
 
 
 def build_llm() -> BaseLLM:
-    """有 key 就用真模型，没有就退回 Mock。顺序：deepseek → openai。"""
-    for provider, (key_env, base, model) in PROVIDERS.items():
+    """有 key 就用真模型，没有就退回 Mock。
+
+    顺序：PROV 指定的那家 → 表里第一家配了 key 的。
+    FORCE_MOCK=1 可以强制走 Mock（想先看链路、或 key 临时欠费时用）。
+    """
+    if (os.getenv("FORCE_MOCK") or "").strip() in ("1", "true", "yes"):
+        return MockLLM()
+
+    forced = (os.getenv(_ENV_PROVIDER) or "").strip().lower()
+    order = list(PROVIDERS)
+    if forced in PROVIDERS:
+        order = [forced] + [p for p in order if p != forced]
+
+    for provider in order:
+        key_env, base, model = PROVIDERS[provider]
         api_key = (os.getenv(key_env) or "").strip()
         # 通用变量也认，方便接表里没有的端点
         if not api_key and provider == "openai":
             api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-        if not api_key:
+        if not api_key or api_key.startswith("sk-在这里"):
             continue
         return OpenAICompatLLM(
             api_key=api_key,
