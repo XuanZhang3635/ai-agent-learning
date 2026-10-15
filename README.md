@@ -15,6 +15,7 @@
     ├── block.py        ★ building block 本体，只做一次模型往返
     ├── llm.py          模型适配：DeepSeek / 任意 OpenAI 兼容端点 / MockLLM
     ├── app.py          Web 服务 + 循环 + Memory
+    ├── eval.py         回归脚本：6 条用例冒烟测试，改完代码先跑它
     ├── .env.example    API key 配置模板（复制成 .env 即可）
     ├── static/         对话前端，执行轨迹可展开
     └── README.md       代码逐文件对应回原文概念
@@ -53,15 +54,32 @@ python -m uvicorn app:app --reload --port 8000
 **不配 API key 也能跑。** 默认走 Mock 模式，用规则模拟模型的决策过程，
 零成本就能看清 `schema → 选工具 → 填参数 → 结果写回` 的完整链路。
 
-想接真实模型（DeepSeek / 通义 / 智谱 / Kimi / 本地 Ollama，任何 OpenAI 兼容端点）：
+想接真实模型（智谱 / DeepSeek / 通义 / Kimi / 本地 Ollama，任何 OpenAI 兼容端点）：
 
 ```bash
 cp stock-agent/.env.example stock-agent/.env
-# 编辑 stock-agent/.env，填入 DEEPSEEK_API_KEY=sk-xxxx
+# 编辑 stock-agent/.env：
+#   PROV=zhipu
+#   ZHIPU_API_KEY=xxxxxxxx.xxxxxxxx
 # 然后重启服务即可
 ```
 
+**推荐先用智谱 `glm-4-flash`**：国内直连、有免费额度、支持 function calling，
+拿来学这个 block 完全够用。DeepSeek 便宜但新账号要先充值，
+余额为 0 时接口返回 402，和代码无关。
+
 `.env` 已在 `.gitignore` 里，不会被提交。
+
+### 改完代码先跑回归
+
+```bash
+python eval.py        # 6 条用例，覆盖 ETF / 基本面 / 指数 / 指代消解 / 公告 / 边界
+python eval.py 3      # 只跑第 3 条
+```
+
+每条用例都在考一个具体的失败模式，不是随手编的。它做的事和网页完全一样 ——
+同一个 block、同一个循环、同一套工具，只是把入口从浏览器换成命令行，
+让你在改完提示词或工具之后的 30 秒内知道有没有把之前修好的东西又改坏。
 
 ### 数据来源
 
@@ -130,5 +148,7 @@ Ignored the following versions that require a different python version:
 - 同名标的可能解析到不是你心里那一只（「半导体ETF」有十几只），
   回答里会点明查到的是哪只；**没有「基金跟踪什么指数」这类工具**
 - 记忆存在进程内存里，重启即丢
-- 没有评估集、没有可观测性、没有沙箱 —— 距离生产还很远
+- `eval.py` 只做冒烟测试（人工看结果），**没有自动断言** ——
+  金融问答的正确答案本身是浮动的（价格每分钟都在变），断言要等定义清楚之后再说
+- 没有可观测性（trace）、没有沙箱 —— 距离生产还很远
 - 所有输出都不构成投资建议

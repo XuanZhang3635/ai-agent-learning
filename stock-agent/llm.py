@@ -387,7 +387,8 @@ def describe_llm(llm: BaseLLM) -> dict[str, str]:
     if isinstance(llm, MockLLM):
         return {"mode": "mock", "model": llm.name,
                 "hint": "未检测到 API key，正在用规则模拟模型决策。"
-                        "在 stock-agent/.env 里填 DEEPSEEK_API_KEY 即可切到真实模型。"}
+                        "在 stock-agent/.env 里填一个 key（推荐智谱 GLM，有免费额度）"
+                        "即可切到真实模型。"}
     return {
         "mode": "live",
         "model": llm.name,
