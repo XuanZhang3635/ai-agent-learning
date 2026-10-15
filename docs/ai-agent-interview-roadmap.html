@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent 面试学习地图</title>
+<style>
+  :root{
+    --bg:#F7F8FA; --card:#FFFFFF; --ink:#16191D; --ink2:#5A626C; --ink3:#8B93A1;
+    --line:#E3E6EB; --blue:#185FA5; --blue-50:#E6F1FB; --blue-200:#85B7EB;
+    --teal:#0F6E56; --teal-50:#E1F5EE;
+    --coral:#993C1D; --coral-50:#FAECE7;
+    --amber:#854F0B; --amber-50:#FAEEDA;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.7; font-size:15px; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:0 24px 96px}
+
+  header{padding:56px 0 32px}
+  .eyebrow{font-size:13px;color:var(--ink3);letter-spacing:.04em;margin-bottom:12px}
+  h1{font-size:34px;line-height:1.3;font-weight:600;letter-spacing:-.01em}
+  .lede{margin-top:14px;font-size:16px;color:var(--ink2);max-width:640px}
+  .meta{margin-top:20px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-size:12.5px;padding:4px 11px;border-radius:999px;background:var(--blue-50);color:var(--blue);border:.5px solid #B5D4F4}
+
+  nav{position:sticky;top:0;z-index:20;background:rgba(247,248,250,.88);backdrop-filter:blur(10px);border-bottom:.5px solid var(--line);margin:0 -24px 40px;padding:0 24px}
+  nav .inner{display:flex;gap:22px;overflow-x:auto;padding:13px 0}
+  nav a{font-size:13.5px;color:var(--ink2);text-decoration:none;white-space:nowrap;padding-bottom:2px;border-bottom:2px solid transparent}
+  nav a:hover{color:var(--blue);border-bottom-color:var(--blue-200)}
+
+  section{margin-bottom:56px;scroll-margin-top:70px}
+  h2{font-size:21px;font-weight:600;letter-spacing:-.01em;margin-bottom:8px}
+  .sub{font-size:14px;color:var(--ink3);margin-bottom:22px}
+
+  .principle{background:var(--card);border:.5px solid var(--line);border-left:3px solid var(--blue);border-radius:12px;padding:18px 22px;margin-bottom:12px}
+  .principle b{font-weight:600}
+  .principle p{font-size:14.5px;color:var(--ink2);margin-top:4px}
+
+  .layer{background:var(--card);border:.5px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:12px}
+  .layer-hd{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  .num{font-size:12px;font-weight:600;color:var(--blue);background:var(--blue-50);border-radius:6px;padding:2px 8px;flex:none}
+  .layer-hd h3{font-size:16.5px;font-weight:600}
+  .layer .tag{font-size:12.5px;color:var(--ink3);margin-left:auto;flex:none}
+  .layer ul{list-style:none;margin-top:12px}
+  .layer li{font-size:14.5px;color:var(--ink2);padding-left:16px;position:relative;margin-bottom:7px}
+  .layer li::before{content:"";position:absolute;left:0;top:11px;width:5px;height:5px;border-radius:50%;background:var(--blue-200)}
+  .layer li b{color:var(--ink);font-weight:600}
+
+  .qa{background:var(--card);border:.5px solid var(--line);border-radius:12px;padding:18px 22px;margin-bottom:10px}
+  .qa .q{font-size:15px;font-weight:600;display:flex;gap:10px}
+  .qa .q .idx{color:var(--blue-200);font-weight:600;flex:none;font-variant-numeric:tabular-nums}
+  .qa .a{font-size:14.5px;color:var(--ink2);margin-top:8px;padding-left:26px}
+  .qa .a em{font-style:normal;color:var(--coral);font-weight:600}
+  .qa .a code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;background:#F0F2F5;padding:1px 5px;border-radius:4px;color:var(--ink)}
+
+  .week{background:var(--card);border:.5px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:12px}
+  .week-hd{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+  .badge{width:30px;height:30px;border-radius:50%;background:var(--teal-50);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;flex:none}
+  .week-hd h3{font-size:16.5px;font-weight:600}
+  .week-hd .goal{margin-left:auto;font-size:12.5px;color:var(--teal);background:var(--teal-50);padding:3px 10px;border-radius:999px;flex:none}
+  label.todo{display:flex;gap:11px;align-items:flex-start;padding:8px 0;cursor:pointer;font-size:14.5px;color:var(--ink2);border-bottom:.5px dashed transparent;transition:color .15s}
+  label.todo:last-child{border-bottom:none;padding-bottom:0}
+  label.todo:hover{color:var(--ink)}
+  label.todo input{appearance:none;width:17px;height:17px;flex:none;margin-top:4px;border:1.5px solid #C3C8D0;border-radius:5px;cursor:pointer;position:relative;transition:all .15s}
+  label.todo input:checked{background:var(--teal);border-color:var(--teal)}
+  label.todo input:checked::after{content:"";position:absolute;left:4.5px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 1.8px 1.8px 0;transform:rotate(45deg)}
+  label.todo input:checked ~ span{color:var(--ink3);text-decoration:line-through;text-decoration-color:#C3C8D0}
+  .progress{height:5px;background:#EBEEF2;border-radius:999px;overflow:hidden;margin:0 0 28px}
+  .progress i{display:block;height:100%;width:0;background:var(--teal);border-radius:999px;transition:width .25s}
+  .progress-note{font-size:13px;color:var(--ink3);margin-bottom:10px;display:flex;justify-content:space-between}
+
+  .code{background:#F2F4F7;border:.5px solid var(--line);border-radius:14px;padding:20px 22px;overflow-x:auto}
+  .code pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.85;color:#1F2328}
+  .code .cm{color:#8B93A1}
+  .code .kw{color:#A32D2D}
+  .code .fn{color:#185FA5}
+
+  .res{background:var(--card);border:.5px solid var(--line);border-radius:12px;padding:16px 20px;display:flex;gap:16px;align-items:baseline;margin-bottom:10px}
+  .res .kind{font-size:12px;color:var(--blue);background:var(--blue-50);padding:2px 9px;border-radius:6px;flex:none;font-weight:600}
+  .res .body{min-width:0}
+  .res .t{font-size:14.5px;font-weight:600}
+  .res .d{font-size:13.5px;color:var(--ink3);margin-top:2px}
+
+  .warn{background:var(--coral-50);border:.5px solid #F0997B;border-radius:12px;padding:18px 22px;margin-top:8px}
+  .warn h4{font-size:14.5px;font-weight:600;color:var(--coral);margin-bottom:8px}
+  .warn ul{list-style:none}
+  .warn li{font-size:14.5px;color:var(--ink2);padding-left:16px;position:relative;margin-bottom:6px}
+  .warn li::before{content:"";position:absolute;left:0;top:11px;width:5px;height:5px;border-radius:50%;background:#F0997B}
+
+  footer{border-top:.5px solid var(--line);padding-top:24px;font-size:13px;color:var(--ink3)}
+  @media (max-width:640px){
+    h1{font-size:26px} .wrap{padding:0 18px 72px}
+    .layer .tag{display:none} .week-hd .goal{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">面试备考 · 学习地图</div>
+  <h1>AI Agent 面试学习地图</h1>
+  <p class="lede">从一个循环讲起，到能设计一套可上线的 Agent 系统。核心不是背概念，而是能讲清「为什么这样设计、代价是什么」。</p>
+  <div class="meta">
+    <span class="chip">六层知识体系</span>
+    <span class="chip">12 道高频问题</span>
+    <span class="chip">四周计划</span>
+    <span class="chip">代码骨架</span>
+  </div>
+</header>
+
+<nav>
+  <div class="inner">
+    <a href="#principles">先记这几条</a>
+    <a href="#map">知识体系</a>
+    <a href="#qa">高频问题</a>
+    <a href="#code">手写骨架</a>
+    <a href="#plan">四周计划</a>
+    <a href="#res">资源</a>
+    <a href="#traps">常见失分</a>
+  </div>
+</nav>
+
+<section id="principles">
+  <h2>先记这几条</h2>
+  <p class="sub">面试开口之前，把这四句话变成条件反射。它们决定你是「用过 Agent」还是「懂 Agent」。</p>
+
+  <div class="principle">
+    <b>1. 能不用 Agent 就不用。</b>
+    <p>Anthropic 的核心观点：大多数需求用一条固定流程（workflow）就够了。Agent 的代价是成本、延迟、不可预测性和调试难度。先问「这活儿的步骤是确定的吗」，确定就别上 Agent。</p>
+  </div>
+  <div class="principle">
+    <b>2. Agent = 模型 + 工具 + 循环 + 记忆。</b>
+    <p>四者缺一，它就退化成一条链式调用。判断一个系统是不是 Agent，看控制流由谁决定 —— 由模型在运行时决定，才叫 Agent。</p>
+  </div>
+  <div class="principle">
+    <b>3. 可靠性靠架构，不靠模型更聪明。</b>
+    <p>单步 95% 正确，20 步之后只剩 36%。所以要步数上限、检查点、可回滚、独立的验证环节、关键节点人审。</p>
+  </div>
+  <div class="principle">
+    <b>4. 上下文是稀缺资源。</b>
+    <p>能塞进窗口 ≠ 该塞进窗口。上下文越长，有效注意力越被稀释，成本和延迟同步上升。学会做减法，比学会做加法更值钱。</p>
+  </div>
+</section>
+
+<section id="map">
+  <h2>六层知识体系</h2>
+  <p class="sub">从上往下是依赖关系：上层不牢，下面全是空中楼阁。</p>
+
+  <div class="layer">
+    <div class="layer-hd"><span class="num">01</span><h3>概念地基</h3><span class="tag">能讲清边界</span></div>
+    <ul>
+      <li><b>三种形态</b>：Chain（固定管道）→ Workflow（人写死的编排）→ Agent（模型决定控制流）。</li>
+      <li><b>五种 Workflow 模式</b>：prompt chaining、routing、parallelization、orchestrator-workers、evaluator-optimizer。</li>
+      <li><b>什么时候不该用</b>：步骤确定、延迟敏感、结果必须可复现、错误代价高 —— 这四种情况都不该用 Agent。</li>
+    </ul>
+  </div>
+
+  <div class="layer">
+    <div class="layer-hd"><span class="num">02</span><h3>核心循环</h3><span class="tag">能画出来</span></div>
+    <ul>
+      <li><b>ReAct</b>：Thought → Action → Observation 交替。边想边做，灵活，但容易跑偏、步数多。</li>
+      <li><b>Plan-and-Execute</b>：先出完整计划再逐步执行。省 token、可并行，但计划错就全错，通常要配一个 replanner。</li>
+      <li><b>Reflexion</b>：失败后自我复盘并重试，把「反思」写回上下文。适合有明显对错反馈的任务。</li>
+      <li><b>搜索式规划</b>：Tree of Thoughts / LATS，把推理当搜索，成本高，一般只用在难题上。</li>
+    </ul>
+  </div>
+
+  <div class="layer">
+    <div class="layer-hd"><span class="num">03</span><h3>四大支柱</h3><span class="tag">面试主战场</span></div>
+    <ul>
+      <li><b>Planning</b>：任务拆解、子目标管理、动态重规划。</li>
+      <li><b>Memory</b>：工作记忆（上下文 message）、情节记忆（历史轨迹，向量库）、语义记忆（事实与偏好，结构化或知识图谱）。难点从来不是存，而是「写入什么、何时检索、怎么遗忘」。</li>
+      <li><b>Tool Use</b>：函数调用、参数 schema、工具粒度与数量、错误可恢复性、写操作的幂等与确认。</li>
+      <li><b>Context Engineering</b>：RAG 精准投喂、compaction 压缩摘要、子 Agent 隔离上下文、大文件放外部按需读取。</li>
+    </ul>
+  </div>
+
+  <div class="layer">
+    <div class="layer-hd"><span class="num">04</span><h3>多智能体</h3><span class="tag">会讲取舍</span></div>
+    <ul>
+      <li><b>常见形态</b>：Supervisor（主管分发）、Hierarchical（分层）、Swarm（对等移交）、Debate（对抗验证）。</li>
+      <li><b>通信协议</b>：A2A、agent card、任务交接的上下文传递格式。</li>
+      <li><b>真实代价</b>：错误累积、通信开销翻倍、调试链被拉长、成本成倍上涨。只有任务能清晰分工、需要上下文隔离、或需要独立视角验证时才值得。</li>
+    </ul>
+  </div>
+
+  <div class="layer">
+    <div class="layer-hd"><span class="num">05</span><h3>工程落地</h3><span class="tag">区分实习生和工程师</span></div>
+    <ul>
+      <li><b>编排框架</b>：LangGraph（状态图 + 检查点）、OpenAI Agents SDK、AutoGen、CrewAI。选型要能说清为什么，并且敢说「不依赖框架我也能写」。</li>
+      <li><b>可观测性</b>：trace / span 级别的记录，能回放一次完整任务；Langfuse、LangSmith、OpenTelemetry。</li>
+      <li><b>人机协同</b>：敏感操作前暂停等审批，中断可恢复，状态要能持久化。</li>
+      <li><b>安全</b>：工具权限最小化、沙箱执行、输出校验；预算与步数上限防跑飞。</li>
+      <li><b>成本与延迟</b>：模型路由、prompt 与结果缓存、并行工具调用、流式输出。</li>
+    </ul>
+  </div>
+
+  <div class="layer">
+    <div class="layer-hd"><span class="num">06</span><h3>评估度量</h3><span class="tag">最容易被问倒</span></div>
+    <ul>
+      <li><b>三个层次</b>：单步（工具选对没、参数对没）、轨迹（步骤合理吗、有无冗余和绕路）、端到端（完成率、步数、成本、延迟）。</li>
+      <li><b>三种手段</b>：规则断言、LLM-as-judge、人工抽检。judge 也要校准，别把它当真理。</li>
+      <li><b>工程习惯</b>：建一个几十条的回归数据集，每次改 prompt 或换模型都跑一遍，看的是趋势不是单次分数。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="qa">
+  <h2>12 道高频问题</h2>
+  <p class="sub">红色是面试官在等的关键词。答不上后三条，基本会被判定为「只调过 API」。</p>
+
+  <div class="qa"><div class="q"><span class="idx">01</span>Agent 和 Workflow 的区别？什么时候不该用 Agent？</div>
+    <div class="a">区别在<em>控制流由谁决定</em>：Workflow 是人提前写死的，Agent 是模型运行时决定下一步。不该用的场景：步骤确定、延迟敏感、结果必须可复现、错误代价高。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">02</span>ReAct 和 Plan-and-Execute 的区别？</div>
+    <div class="a">ReAct 边想边做，每步依赖上一步观察，灵活但易跑偏、步数多；Plan-and-Execute 先规划后执行，省 token 且可并行，但计划一旦错就全错，通常要配 <em>replanner</em> 动态修正。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">03</span>Agent 的记忆怎么设计？</div>
+    <div class="a">分三层：工作记忆（上下文里的 message）、情节记忆（历史任务轨迹，存向量库）、语义记忆（事实与偏好，结构化或知识图谱）。真正难的是<em>写入什么、何时检索、怎么遗忘</em>。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">04</span>上下文是越长越好吗？</div>
+    <div class="a">不是。存在 <em>context rot</em>：长度上去后有效注意力被稀释，准确率下降，成本和延迟同步上升。策略是 RAG 精准检索、compaction 摘要压缩、子 Agent 隔离上下文、大文件外置按需读取。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">05</span>MCP 是什么？解决什么问题？</div>
+    <div class="a">Model Context Protocol，把工具 / 资源 / 提示词的接入标准化为 client-server 结构，解决 <code>M×N</code> 的集成爆炸问题 —— 可以类比成「工具界的 USB-C」。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">06</span>工具该怎么设计才不出错？</div>
+    <div class="a">数量克制（单轮 5–10 个以内效果最好）；工具名和描述是写给模型看的 API 文档；参数 schema 要严格；错误要<em>可恢复</em>，返回有意义的报错而不是抛异常；写操作必须幂等并加人工确认。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">07</span>多 Agent 一定比单 Agent 好吗？</div>
+    <div class="a">不一定，多数情况更差。代价是错误累积、通信开销、调试困难、成本成倍。只有当任务能清晰分工、需要上下文隔离、或需要对抗性验证时才值得上。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">08</span>怎么评估一个 Agent？</div>
+    <div class="a">三层：单步、轨迹、端到端（完成率 / 步数 / 成本 / 延迟）。手段是规则断言 + LLM-as-judge + 人工抽检。关键工程习惯是<em>回归数据集</em>：改一次 prompt 就跑一遍全量。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">09</span>Prompt Injection 怎么防？</div>
+    <div class="a">根因是不可信输入和系统指令处在同一上下文里。<em>纵深防御</em>：工具权限最小化（只读优先）、敏感操作人工确认、沙箱执行、外部内容明确标记为「数据」而非「指令」、输入输出过滤。没有银弹，别承诺能根治。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">10</span>模型越来越强，为什么 Agent 还是不可靠？</div>
+    <div class="a"><em>误差累积</em>：单步 95% 正确率，20 步后只剩约 36%。所以要在架构上补：步数上限、检查点与回滚、独立验证环节、关键节点人审。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">11</span>成本和延迟怎么优化？</div>
+    <div class="a">模型路由（简单步骤走小模型）、prompt 缓存与结果缓存、并行工具调用、压缩上下文长度、限制步数、流式输出改善体感。</div></div>
+
+  <div class="qa"><div class="q"><span class="idx">12</span>你会选哪个框架？</div>
+    <div class="a">先声明不依赖框架也能手写。需要状态机与持久化 → LangGraph；想要轻量 → OpenAI Agents SDK 或自研；多 Agent 研究 → AutoGen。选型维度：是否需要持久化状态、是否要 human-in-the-loop、团队熟悉度。</div></div>
+</section>
+
+<section id="code">
+  <h2>手写骨架</h2>
+  <p class="sub">面试让你「实现一个 Agent」时，这段结构能覆盖 80% 的考点：循环、工具分发、上下文写回、终止条件、步数保护。</p>
+  <div class="code">
+<pre><span class="cm"># 一个最小可用的 ReAct Agent —— 不依赖任何框架</span>
+<span class="kw">def</span> <span class="fn">run_agent</span>(goal, tools, max_steps=<span class="kw">10</span>):
+    messages = [
+        {<span class="cm">"role"</span>: <span class="cm">"system"</span>, <span class="cm">"content"</span>: SYSTEM_PROMPT},
+        {<span class="cm">"role"</span>: <span class="cm">"user"</span>,   <span class="cm">"content"</span>: goal},
+    ]
+
+    <span class="kw">for</span> step <span class="kw">in</span> <span class="fn">range</span>(max_steps):          <span class="cm"># 步数上限：防跑飞</span>
+        resp = llm.chat(messages, tools=tools)  <span class="cm"># 模型自己决定：回答 or 调工具</span>
+
+        <span class="kw">if</span> <span class="kw">not</span> resp.tool_calls:              <span class="cm"># 没有工具调用 → 任务结束，输出答案</span>
+            <span class="kw">return</span> resp.content
+
+        messages.append(resp)                  <span class="cm"># Thought + Action 写回上下文</span>
+        <span class="kw">for</span> call <span class="kw">in</span> resp.tool_calls:          <span class="cm"># 支持一轮多个工具并行调用</span>
+            <span class="kw">try</span>:
+                result = TOOL_REGISTRY[call.name](**call.args)
+            <span class="kw">except</span> Exception <span class="kw">as</span> e:
+                result = <span class="fn">f</span><span class="cm">"工具报错：{e}，请调整参数后重试"</span>  <span class="cm"># 错误要可恢复</span>
+            messages.append(tool_message(call.id, result))
+
+    <span class="kw">return</span> <span class="cm">"达到最大步数，任务未完成"</span></pre>
+  </div>
+  <p class="sub" style="margin:14px 0 0;font-size:13.5px">能接着往下讲这几点，就是加分项：工具出错如何让模型自愈、如何把长历史做压缩、如何在此处插入 human-in-the-loop 断点、如何给每一步打 trace。</p>
+</section>
+
+<section id="plan">
+  <h2>四周计划</h2>
+  <p class="sub">勾选进度会存在本地，下次打开还在。</p>
+  <div class="progress-note"><span>完成度</span><span id="pct">0 / 20</span></div>
+  <div class="progress"><i id="bar"></i></div>
+
+  <div class="week">
+    <div class="week-hd"><span class="badge">1</span><h3>打地基</h3><span class="goal">目标：能手写循环</span></div>
+    <label class="todo"><input type="checkbox" data-k="w1a"><span>精读 Anthropic《Building Effective Agents》，能复述五种 workflow 模式</span></label>
+    <label class="todo"><input type="checkbox" data-k="w1b"><span>读 ReAct 论文，讲清 Thought / Action / Observation 为什么要交替</span></label>
+    <label class="todo"><input type="checkbox" data-k="w1c"><span>读 12-Factor Agents，理解「把 Agent 当软件工程做」</span></label>
+    <label class="todo"><input type="checkbox" data-k="w1d"><span>不用框架，手写一个 ReAct 循环（至少 2 个工具）</span></label>
+    <label class="todo"><input type="checkbox" data-k="w1e"><span>加上 max_steps 与错误重试，跑通 3 个真实任务</span></label>
+  </div>
+
+  <div class="week">
+    <div class="week-hd"><span class="badge">2</span><h3>装武器</h3><span class="goal">目标：工具与记忆</span></div>
+    <label class="todo"><input type="checkbox" data-k="w2a"><span>掌握 function calling 与 structured output 的正确用法</span></label>
+    <label class="todo"><input type="checkbox" data-k="w2b"><span>读 MCP 规范，自己写一个 MCP server 并暴露 2 个工具</span></label>
+    <label class="todo"><input type="checkbox" data-k="w2c"><span>实现一套 RAG：chunking → embedding → 检索 → rerank</span></label>
+    <label class="todo"><input type="checkbox" data-k="w2d"><span>给 Agent 加长期记忆，含写入、检索、遗忘策略</span></label>
+    <label class="todo"><input type="checkbox" data-k="w2e"><span>对比「塞全文 / RAG / 摘要压缩」在长文档任务上的效果</span></label>
+  </div>
+
+  <div class="week">
+    <div class="week-hd"><span class="badge">3</span><h3>上工程</h3><span class="goal">目标：可观测可中断</span></div>
+    <label class="todo"><input type="checkbox" data-k="w3a"><span>用 LangGraph 把循环改写成状态图，含条件边与检查点</span></label>
+    <label class="todo"><input type="checkbox" data-k="w3b"><span>实现 human-in-the-loop：敏感工具调用前暂停等审批</span></label>
+    <label class="todo"><input type="checkbox" data-k="w3c"><span>接入 Tracing，能读懂一次完整任务的调用链</span></label>
+    <label class="todo"><input type="checkbox" data-k="w3d"><span>做一个多 Agent 版本（supervisor + 2 worker），并写下它比单 Agent 差在哪</span></label>
+    <label class="todo"><input type="checkbox" data-k="w3e"><span>加上工具权限白名单与沙箱执行</span></label>
+  </div>
+
+  <div class="week">
+    <div class="week-hd"><span class="badge">4</span><h3>冲面试</h3><span class="goal">目标：开口有结构</span></div>
+    <label class="todo"><input type="checkbox" data-k="w4a"><span>建立 20 条评估集，跑通「改 prompt → 回归测试」闭环</span></label>
+    <label class="todo"><input type="checkbox" data-k="w4b"><span>练 3 道系统设计题：客服 Agent / 编码 Agent / 深度研究 Agent</span></label>
+    <label class="todo"><input type="checkbox" data-k="w4c"><span>把项目整理成 STAR，准备 2 个失败案例及修复过程</span></label>
+    <label class="todo"><input type="checkbox" data-k="w4d"><span>模拟讲一遍「什么时候不该用 Agent」，控制在 2 分钟内</span></label>
+    <label class="todo"><input type="checkbox" data-k="w4e"><span>准备 5 个反问面试官的问题</span></label>
+  </div>
+</section>
+
+<section id="res">
+  <h2>资源清单</h2>
+  <p class="sub">按优先级排的，前四个读完就够撑起一轮面试。</p>
+  <div class="res"><span class="kind">必读</span><div class="body"><div class="t">Building Effective Agents</div><div class="d">Anthropic 官方工程博客 · 讲清何时该用 Agent、五种 workflow 模式</div></div></div>
+  <div class="res"><span class="kind">必读</span><div class="body"><div class="t">12-Factor Agents</div><div class="d">HumanLayer 出品 · 把 Agent 当生产软件来做的十二条原则</div></div></div>
+  <div class="res"><span class="kind">论文</span><div class="body"><div class="t">ReAct: Synergizing Reasoning and Acting</div><div class="d">arXiv 2210.03629 · 所有 Agent 循环的源头</div></div></div>
+  <div class="res"><span class="kind">论文</span><div class="body"><div class="t">Reflexion: Language Agents with Verbal RL</div><div class="d">arXiv 2303.11366 · 自我反思与重试机制</div></div></div>
+  <div class="res"><span class="kind">规范</span><div class="body"><div class="t">Model Context Protocol</div><div class="d">modelcontextprotocol.io · 现在面试高频，建议动手写一个 server</div></div></div>
+  <div class="res"><span class="kind">书</span><div class="body"><div class="t">AI Engineering · Chip Huyen</div><div class="d">评估、检索、生产化的系统性讲解</div></div></div>
+  <div class="res"><span class="kind">文档</span><div class="body"><div class="t">LangGraph 官方文档</div><div class="d">状态图、检查点、human-in-the-loop 的最佳教材</div></div></div>
+  <div class="res"><span class="kind">指南</span><div class="body"><div class="t">A Practical Guide to Building Agents</div><div class="d">OpenAI 出品 · 偏落地与安全护栏</div></div></div>
+</section>
+
+<section id="traps">
+  <h2>常见失分点</h2>
+  <p class="sub">这几句一说出口，面试官对你的评价就会掉一档。</p>
+  <div class="warn">
+    <h4>别说这些话</h4>
+    <ul>
+      <li>「多 Agent 比单 Agent 强」—— 不给出场景和代价，等于没想过成本。</li>
+      <li>「上下文窗口大，全塞进去就行」—— 完全不懂 context rot 和注意力稀释。</li>
+      <li>「用 RAG 就不会幻觉了」—— 检索错、引用错、拼装错，幻觉照样有。</li>
+      <li>「框架会自动帮我搞定」—— 面试官在测你到底懂不懂框架下面发生了什么。</li>
+      <li>只讲功能不讲评估 —— 没有评估体系的 Agent 项目，在生产上等于没交付。</li>
+      <li>把 prompt engineering 当成全部 —— 现在更看重 context engineering 和系统架构。</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  AI Agent 面试学习地图 · 建议每周复盘一次，把打勾的内容用一句话讲给别人听，讲不顺的就是没真懂。
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var boxes = document.querySelectorAll('label.todo input');
+  var bar = document.getElementById('bar');
+  var pct = document.getElementById('pct');
+  var KEY = 'agent-interview-checklist';
+
+  function render() {
+    var done = 0;
+    boxes.forEach(function (b) { if (b.checked) done++; });
+    bar.style.width = (done / boxes.length * 100) + '%';
+    pct.textContent = done + ' / ' + boxes.length;
+  }
+
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { saved = {}; }
+  boxes.forEach(function (b) {
+    if (saved[b.dataset.k]) b.checked = true;
+    b.addEventListener('change', function () {
+      saved[b.dataset.k] = b.checked;
+      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      render();
+    });
+  });
+  render();
+})();
+</script>
+</body>
+</html>
