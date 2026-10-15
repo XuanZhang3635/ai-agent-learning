@@ -33,13 +33,21 @@
 
 ## 跑起来
 
+**环境要求：Python ≥ 3.10**（fastapi 0.115+ 要求 ≥3.8，0.129+ 要求 ≥3.10）。
+
 ```bash
 cd stock-agent
+python3 -m venv .venv          # 建议用虚拟环境，别装到全局
+source .venv/bin/activate
 pip install -r requirements.txt
 python -m uvicorn app:app --reload --port 8000
 ```
 
 打开 http://127.0.0.1:8000
+
+先确认一下 `python3 -V` 是 3.10 以上。如果机器上有多个 Python，
+用绝对路径显式指定，比如 macOS 上常见的
+`/Library/Frameworks/Python.framework/Versions/3.10/bin/python3 -m venv .venv`。
 
 **不需要任何 API key**。默认走 Mock 模式，用规则模拟模型的决策过程，
 零成本就能看清 `schema → 选工具 → 填参数 → 结果写回` 的完整链路。
@@ -60,6 +68,26 @@ export OPENAI_MODEL=deepseek-chat
 - 12 道高频面试问题及答题要点
 - 可直接背下来的 ReAct 代码骨架
 - 四周备考计划清单（进度存在浏览器本地）
+
+## 常见问题
+
+**`ERROR: No matching distribution found for fastapi>=0.115`**
+
+这不是网络问题，是 **Python 版本太旧**。fastapi 从 0.104 起要求 Python ≥3.8，
+0.129 起要求 ≥3.10，pip 会把不满足 `Requires-Python` 的版本全部过滤掉，
+于是报成"找不到"。先跑 `python3 -V` 确认版本，用 3.10+ 重建虚拟环境即可。
+
+想看清真相，pip 其实把原因写在报错上面一行（容易被刷屏淹没）：
+
+```
+Ignored the following versions that require a different python version:
+  0.104.0 Requires-Python >=3.8; ... 0.143.1 Requires-Python >=3.10
+```
+
+**装完但 `python -m uvicorn` 提示找不到模块**
+
+确认你用的 `python` 和 `pip` 来自同一个环境：`which python` / `pip -V`。
+混用全局 pip 和虚拟环境解释器是高频坑。
 
 ## 已知限制
 
