@@ -261,19 +261,54 @@ async def get_price_history(symbol: str, days: int = 20) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# 工具 3：本地知识库检索（Retrieval）
+# 工具 3-5：基本面三件套（真实查询东方财富 F10）
 # --------------------------------------------------------------------------
-def search_company_notes(query: str) -> dict[str, Any]:
-    """在本地公司资料库里做关键词检索。
+# 这三个工具替代了最初的「本地硬编码资料库」。
+# 替换的理由很实际：硬编码的资料库只有 10 家公司、永远不会更新，
+# 用户问第 11 家就哑火 —— 这种「看起来能跑但一到真实场景就废」的实现，
+# 是做一个能用的 block 时最常见的自欺欺人。
+#
+# 注意每个工具的第一行：**必须先用 resolve_symbols 归一化**。
+# 模型传进来的可能是「贵州茅台」「600519」「sh600519」中的任意一种，
+# 而下游接口只认其中一种。归一化漏掉一处的直接后果就是：
+# 模型参数填得完全正确，工具却报错 —— 这种 bug 最难查，因为两边看起来都没错。
+def _one_symbol(raw: str) -> tuple[str | None, dict[str, Any] | None]:
+    """归一化单个标的；失败时返回一句模型能看懂的错误。"""
+    codes = resolve_symbols(str(raw))
+    if not codes:
+        return None, {
+            "ok": False,
+            "error": f"无法从 {raw!r} 识别出股票代码，请给出 6 位代码（如 600519）"
+                     f"或常见简称（如 贵州茅台）。",
+        }
+    return codes[0], None
 
-    知识点：检索工具的 description 里必须写清楚「库里有什么」。
-    否则模型不知道什么时候该用你，只好瞎猜或者干脆不检索。
-    """
-    from notes import search
-    hits = search(str(query))
-    if not hits:
-        return {"ok": False, "error": f"本地资料库里没有和 {query!r} 相关的内容。"}
-    return {"ok": True, "kind": "notes", "data": hits}
+
+async def get_company_profile(symbol: str) -> dict[str, Any]:
+    """公司概况：全称、所属行业、上市信息、实控人、主营与经营范围、公司简介。"""
+    code, err = _one_symbol(symbol)
+    if err:
+        return err
+    from eastmoney import fetch_company_profile
+    return await fetch_company_profile(code)
+
+
+async def get_financials(symbol: str) -> dict[str, Any]:
+    """财务与经营结构：最新报告期的营收/净利/ROE/毛利率/负债率，以及主营构成拆分。"""
+    code, err = _one_symbol(symbol)
+    if err:
+        return err
+    from eastmoney import fetch_financials
+    return await fetch_financials(code)
+
+
+async def get_announcements(symbol: str, limit: int = 8) -> dict[str, Any]:
+    """最近公告标题列表。"""
+    code, err = _one_symbol(symbol)
+    if err:
+        return err
+    from eastmoney import fetch_announcements
+    return await fetch_announcements(code, int(limit or 8))
 
 
 # --------------------------------------------------------------------------
@@ -325,18 +360,60 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "search_company_notes",
+            "name": "get_company_profile",
             "description": (
-                "检索本地公司资料库，返回公司主营业务、所属行业、核心看点与已知风险。"
-                "资料库只收录了有限几只标的，只覆盖基本面描述，不含实时数据。"
-                "当用户问「这家公司是做什么的」「主营业务」「有什么风险」时使用。"
+                "查询公司的静态基本面资料：公司全称、所属行业、上市日期、实际控制人、"
+                "员工人数、主营业务、经营范围，以及公司简介全文。"
+                "用户问「这家公司是做什么的」「属于什么行业」「什么时候上市的」"
+                "「实际控制人是谁」时使用。"
+                "注意：只覆盖 A 股（含北交所）；港股、美股会返回不支持。"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "检索关键词，如 '比亚迪 主营' 或 '宁德时代 风险'。"},
+                    "symbol": {"type": "string", "description": "标的名称或 6 位代码，如 '贵州茅台' 或 '600519'。"},
                 },
-                "required": ["query"],
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_financials",
+            "description": (
+                "查询公司最新报告期的财务表现与收入结构，返回营业总收入、归母净利润、"
+                "每股收益、净资产收益率、销售毛利率、资产负债率（均含同比），"
+                "以及按产品/按地区拆分的主营构成（收入、占比、毛利率）。"
+                "用户问「赚不赚钱」「业绩如何」「靠什么赚钱」「毛利率多少」"
+                "「哪块业务贡献最大」时使用。"
+                "注意：只覆盖 A 股；这是财报数据，不是股价数据。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "标的名称或 6 位代码，如 '宁德时代' 或 '300750'。"},
+                },
+                "required": ["symbol"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_announcements",
+            "description": (
+                "查询公司最近披露的公告标题列表，返回标题、公告类型和披露日期。"
+                "用户问「最近有什么消息」「有没有发公告」「最近发生了什么」时使用。"
+                "注意：只返回标题，不含正文内容；只覆盖 A 股。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "标的名称或 6 位代码，如 '贵州茅台'。"},
+                    "limit": {"type": "integer", "description": "返回条数，默认 8，范围 1-20。"},
+                },
+                "required": ["symbol"],
             },
         },
     },
@@ -346,7 +423,9 @@ TOOLS: list[dict[str, Any]] = [
 TOOL_REGISTRY = {
     "get_stock_quote": get_stock_quote,
     "get_price_history": get_price_history,
-    "search_company_notes": search_company_notes,
+    "get_company_profile": get_company_profile,
+    "get_financials": get_financials,
+    "get_announcements": get_announcements,
 }
 
 

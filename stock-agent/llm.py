@@ -1,28 +1,42 @@
 """
 模型适配层 —— 把「不同家的大模型」抹平成同一个接口。
 
-面试常问：换模型要改多少代码？最好的答案是「改环境变量」。
+面试常问：换模型要改多少代码？最好的答案是「改 .env」。
+
 所以这里定一个统一协议，真实模型和 Mock 模型都遵守它：
 
     async chat(messages, tools) -> {"content": str, "tool_calls": [...]}
 
-换成真实模型只需要设置环境变量：
-    export OPENAI_API_KEY=sk-xxx
-    export OPENAI_BASE_URL=https://api.deepseek.com/v1   # 或者任何 OpenAI 兼容端点
-    export OPENAI_MODEL=deepseek-chat
+接真实模型：在项目根目录建一个 .env（已被 gitignore，不会误传）：
 
-不设 key 就自动落到 MockLLM —— 用规则模拟模型的决策过程。
+    DEEPSEEK_API_KEY=sk-xxxx
+
+或者用任何 OpenAI 兼容端点：
+
+    OPENAI_API_KEY=sk-xxxx
+    OPENAI_BASE_URL=https://api.deepseek.com/v1
+    OPENAI_MODEL=deepseek-chat
+
+没配 key 就自动落到 MockLLM —— 用规则模拟模型的决策过程。
 这样在你还没配 key 的时候，整条链路依然是通的、可观察的。
 """
 import json
 import os
 import re
 import uuid
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from tools import resolve_symbols
+
+# python-dotenv 随 uvicorn[standard] 一起装上了；没装也不影响运行
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env", override=False)
+except ImportError:  # pragma: no cover
+    pass
 
 
 class BaseLLM:
@@ -37,10 +51,12 @@ class BaseLLM:
 # 真实模型：任何 OpenAI 兼容端点（OpenAI / DeepSeek / 通义 / Kimi / Ollama ...）
 # --------------------------------------------------------------------------
 class OpenAICompatLLM(BaseLLM):
-    def __init__(self, api_key: str, base_url: str, model: str) -> None:
+    def __init__(self, api_key: str, base_url: str, model: str,
+                 provider: str = "openai") -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.provider = provider
         self.name = model
 
     async def chat(self, messages, tools):
@@ -78,11 +94,6 @@ class OpenAICompatLLM(BaseLLM):
 # --------------------------------------------------------------------------
 # Mock 模型：没有 key 时的替身，用规则模拟「模型会怎么决定」
 # --------------------------------------------------------------------------
-_FINALIZE_HINT = (
-    "请基于上面工具返回的数据，用中文给出简洁、有结构的回答。"
-    "涉及涨跌时注意区分「实时行情」和「区间走势」。"
-)
-
 # 忘了这一步，118730083 会以 1.1873e+08 的形式出现在回答里
 def _n(value: Any, digits: int = 2) -> str:
     if value is None:
@@ -146,10 +157,18 @@ class MockLLM(BaseLLM):
         symbols = resolve_symbols(q)
         symbol_arg = ",".join(symbols)
 
-        wants_history = bool(re.search(r"走势|趋势|最近|近期|这几天|日线|区间|涨幅|跌了多少|表现|k线", q))
+        # 注意顺序：公告里的「最近有什么」也会命中走势的「最近」，
+        # 所以先算公告，再把它从走势里排除掉。规则式实现最容易在这种
+        # 关键词打架的地方出错 —— 这正是 Mock 与真模型最本质的差距。
+        wants_ann = bool(re.search(r"公告|消息|新闻|披露|发生了什么|最近有什么", q))
+        wants_history = bool(
+            re.search(r"走势|趋势|最近|近期|这几天|日线|区间|涨幅|跌了多少|表现|k线", q)
+        ) and not wants_ann
         wants_quote = bool(re.search(
             r"现在|现价|多少钱|股价|报价|涨|跌|行情|估值|市盈率|市值|换手|成交|怎么样|如何|看看", q))
-        wants_notes = bool(re.search(r"主营业务|做什么|业务|简介|介绍|风险|行业|基本面|是什么公司|看点", q))
+        wants_profile = bool(re.search(r"做什么|主营业务|简介|介绍|行业|是什么公司|上市|实控人|老板|官网|员工", q))
+        wants_financials = bool(re.search(
+            r"财报|业绩|营收|收入|净利润|利润|毛利|roe|净资产收益率|负债率|赚不赚钱|靠什么赚|收入构成|主营构成|哪块业务|占比", q, re.I))
 
         if not symbols:
             return []
@@ -159,8 +178,14 @@ class MockLLM(BaseLLM):
             days = int(m.group(1)) if m else 20
             emit("get_price_history", {"symbol": symbols[0], "days": days})
 
-        if wants_notes:
-            emit("search_company_notes", {"query": q})
+        if wants_profile:
+            emit("get_company_profile", {"symbol": symbols[0]})
+
+        if wants_financials:
+            emit("get_financials", {"symbol": symbols[0]})
+
+        if wants_ann:
+            emit("get_announcements", {"symbol": symbols[0], "limit": 8})
 
         # 只要在问行情，或者前面什么都没命中，就补一次实时行情
         if wants_quote or not calls:
@@ -215,28 +240,86 @@ class MockLLM(BaseLLM):
                     f"日均成交 {_n(data['avg_volume'], 0)}{data.get('volume_unit', '')}。"
                 )
 
-            elif kind == "notes":
-                for doc in data:
-                    blocks.append(
-                        f"【{doc['name']}】{doc['industry']}\n"
-                        f"主营：{doc['business']}\n"
-                        f"看点：{doc['highlights']}\n"
-                        f"风险：{doc['risks']}"
-                    )
+            elif kind == "profile":
+                p = data["profile"]
+                lines = [f"【{data['name']}】公司概况"]
+                for label in ("公司全称", "所属行业（东财）", "上市板块", "上市日期",
+                              "实际控制人", "员工人数", "公司官网", "办公地址",
+                              "主营业务", "经营范围", "公司简介"):
+                    if p.get(label):
+                        lines.append(f"{label}：{p[label]}")
+                blocks.append("\n".join(lines))
+
+            elif kind == "financials":
+                lines = [f"{data['code']} 财务与经营结构"
+                         f"（报告期 {data.get('report_period', '—')}）"]
+                for m in data.get("metrics", []):
+                    yoy = f"，同比 {m['同比']}" if m.get("同比") else ""
+                    lines.append(f"{m['指标']}：{m['数值']}{m['单位']}{yoy}")
+                mb = data.get("main_business") or {}
+                if mb:
+                    lines.append(f"主营构成（{data.get('main_business_period', '')}）")
+                    for dim, items in mb.items():
+                        for it in items:
+                            lines.append(
+                                f"  {dim}｜{it['项目']}：收入 {it['收入']} 亿元，"
+                                f"占比 {it['占比']}，毛利率 {it['毛利率']}"
+                            )
+                blocks.append("\n".join(lines))
+
+            elif kind == "announcements":
+                lines = [f"{data['code']} 最近 {data['count']} 条公告"]
+                for i, it in enumerate(data["items"], 1):
+                    lines.append(f"{i}. [{it['披露时间']}｜{it['类型']}] {it['标题']}")
+                blocks.append("\n".join(lines))
 
         body = "\n".join(f"- {b}" for b in blocks) if blocks else "没有取到可用数据。"
         return body + "\n\n（以上由本地数据源实时返回，不构成投资建议。）"
 
 
 # --------------------------------------------------------------------------
-# 工厂：按环境变量选择实现
+# 工厂：按 .env / 环境变量选择实现
 # --------------------------------------------------------------------------
+# 归一化：不管用哪家，调用方看到的都是同一个 BaseLLM。
+# 加一家新供应商 = 往这张表里加一行 + 在 .env 里写个 key。
+PROVIDERS: dict[str, tuple[str, str, str]] = {
+    #  provider    : (key 环境变量,        base_url,                     默认模型)
+    "deepseek": ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1", "deepseek-chat"),
+    "openai":   ("OPENAI_API_KEY",   "https://api.openai.com/v1",  "gpt-4o-mini"),
+}
+# 显式覆盖用的通用变量名（任何 OpenAI 兼容端点都能接）
+_ENV_BASE = "OPENAI_BASE_URL"
+_ENV_MODEL = "OPENAI_MODEL"
+
+
 def build_llm() -> BaseLLM:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return MockLLM()
-    return OpenAICompatLLM(
-        api_key=api_key,
-        base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-    )
+    """有 key 就用真模型，没有就退回 Mock。顺序：deepseek → openai。"""
+    for provider, (key_env, base, model) in PROVIDERS.items():
+        api_key = (os.getenv(key_env) or "").strip()
+        # 通用变量也认，方便接表里没有的端点
+        if not api_key and provider == "openai":
+            api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if not api_key:
+            continue
+        return OpenAICompatLLM(
+            api_key=api_key,
+            base_url=os.getenv(_ENV_BASE) or base,
+            model=os.getenv(_ENV_MODEL) or model,
+            provider=provider,
+        )
+    return MockLLM()
+
+
+def describe_llm(llm: BaseLLM) -> dict[str, str]:
+    """给前端展示用：现在跑的到底是真的还是假的。"""
+    if isinstance(llm, MockLLM):
+        return {"mode": "mock", "model": llm.name,
+                "hint": "未检测到 API key，正在用规则模拟模型决策。"
+                        "在 stock-agent/.env 里填 DEEPSEEK_API_KEY 即可切到真实模型。"}
+    return {
+        "mode": "live",
+        "model": llm.name,
+        "provider": getattr(llm, "provider", "openai"),
+        "endpoint": getattr(llm, "base_url", ""),
+        "hint": "已接真实模型，工具选择与最终回答都由模型自己决定。",
+    }

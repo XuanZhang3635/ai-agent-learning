@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from block import SYSTEM_PROMPT, AugmentedLLM
-from llm import build_llm
+from llm import build_llm, describe_llm
 from tools import TOOLS
 
 MAX_STEPS = 5           # 步数上限：防跑飞，也是成本护栏
@@ -58,10 +58,9 @@ async def index() -> FileResponse:
 @app.get("/api/config")
 async def config() -> dict[str, Any]:
     """告诉前端当前跑在什么模式，以及块里挂了哪些工具。"""
-    is_mock = BLOCK.llm.name.startswith("mock")
+    info = describe_llm(BLOCK.llm)
     return {
-        "mode": "mock" if is_mock else "live",
-        "model": BLOCK.llm.name,
+        **info,
         "max_steps": MAX_STEPS,
         "history_turns": HISTORY_TURNS,
         "tools": [
