@@ -125,6 +125,25 @@ Ignored the following versions that require a different python version:
 确认你用的 `python` 和 `pip` 来自同一个环境：`which python` / `pip -V`。
 混用全局 pip 和虚拟环境解释器是高频坑。
 
+**`[Errno 48] Address already in use` —— 8000 被占用**
+
+说明已经有一个实例在跑（多半是上一次忘了关，或者编辑器/别的项目占了 8000，
+比如 Jupyter、AirPlay 接收器、Docker）。
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN     # 看是谁占的
+kill <PID>                            # 把它关掉（PID 换成上面查到的）
+```
+
+懒得查就直接换个端口，效果完全一样：
+
+```bash
+python -m uvicorn app:app --reload --port 8010
+```
+
+注意 **`--reload` 只自动重载导入的模块**。改了 `.env` 不会被自动加载 ——
+改 key 或换供应商之后必须手动重启进程。
+
 **页面显示 mock 模式，但我明明配了 key**
 
 1. `.env` 要放在 `stock-agent/` 下（和 `app.py` 同级），不是仓库根目录
